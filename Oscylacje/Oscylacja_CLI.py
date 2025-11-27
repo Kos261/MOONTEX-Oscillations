@@ -138,10 +138,8 @@ def oscillations(tic, x1,x2, cycles_goal):
     time.sleep(DWELL_S)
     move_and_wait(tic, 0)
 
-def keep_moving(tic, speed = int(MAX_SPEED * 0.33), cycles_goal= 10):
-    zero = tic.get_current_position()
+def keep_moving(tic, speed=int(MAX_SPEED * 0.33), cycles_goal=10):
     counter = 0
-
     accel = max(1, int(MAX_ACCEL * 0.8))
     decel = max(1, int(MAX_DECEL * 0.8))
 
@@ -149,15 +147,21 @@ def keep_moving(tic, speed = int(MAX_SPEED * 0.33), cycles_goal= 10):
     tic.set_max_deceleration(decel)
     tic.set_max_speed(speed)
 
-    try:
-        while counter <= cycles_goal:
-            pos = tic.get_current_position() % 400*18
-            if pos >= 400*18:
-                # tic.halt_and_set_position(0)
-                counter += 1
-                print("Cycle: ", counter)
+    steps_per_rev = 400 * 18
+    prev_pos_mod = tic.get_current_position() % steps_per_rev
 
-            # print("POS: ",pos)
+    try:
+        while counter < cycles_goal:
+            cur = tic.get_current_position()
+            pos_mod = cur % steps_per_rev
+
+            # if positive direction
+            if pos_mod < prev_pos_mod:
+                counter += 1
+                print("Cycle:", counter)
+
+            prev_pos_mod = pos_mod
+
             tic.set_target_velocity(speed)
             if keyboard.is_pressed(" "):
                 tic.set_target_velocity(0)
@@ -260,24 +264,62 @@ def init_and_configure():
     return tic
 
 def main():
-    choice = 1
+    # 1. wybór trybu
+    while True:
+        try:
+            choice = int(input("Chose Oscillations (1) or Constant speed (2): "))
+        except ValueError:
+            print("Podaj 1 lub 2.")
+            continue
 
-    x1, x2, cycles_goal = parse_cli_or_interactive()
+        if choice in (1, 2):
+            break
+        else:
+            print("Podaj 1 lub 2.")
+
+    if choice == 1:
+        x1, x2, cycles_goal = parse_cli_or_interactive()
+        speed = None  # Na razie bez  speed ale można dodać
+    else:
+        while True:
+            try:
+                cycles_goal = int(input("Cycles goal: "))
+            except ValueError:
+                print("Podaj liczbę całkowitą.")
+                continue
+            if cycles_goal > 0:
+                break
+            else:
+                print("Liczba cykli musi być dodatnia.")
+
+        # możesz też zrobić input na speed, ale zostawiam Twoje stałe 0.6
+        speed = int(MAX_SPEED * 0.6)
+
+    # 3. dopiero teraz konfigurujesz Tic + ruch
+    tic = init_and_configure()
+
     try:
-        tic = init_and_configure()
         if choice == 1:
             oscillations(tic, x1, x2, cycles_goal)
-        elif choice == 2:
-            keep_moving(tic, int(MAX_SPEED*0.6), cycles_goal)
+        else:
+            keep_moving(tic, speed, cycles_goal)
+
     except KeyboardInterrupt:
         print("\nPrzerwano przez użytkownika.")
+
     finally:
         try:
             tic.enter_safe_start()
             tic.deenergize()
         except Exception:
             pass
-            print("Silnik odłączony, safe start aktywny.") # Dzięki temu okno konsoli nie zamknie się od razu przy dwukliku exe try: input("Naciśnij Enter, aby zakończyć...") except EOFError: pass if choice == 2: speed = int(input("Predkosc: ")) cycles = int(input("Ile cykli: ")) if speed >= MAX_SPEED: raise Exception try: keep_moving(tic, speed=speed, cycles_goal=cycles) except KeyboardInterrupt: print("\nPrzerwano przez użytkownika.") finally: try: tic.enter_safe_start() tic.deenergize() except Exception: pass print("Silnik odłączony, safe start aktywny.") # Dzięki temu okno konsoli nie zamknie się od razu przy dwukliku exe try: input("Naciśnij Enter, aby zakończyć...") except EOFError: pass if __name__ == "__main__":
+        print("Silnik odłączony, safe start aktywny.")
+
+        try:
+            input("Naciśnij Enter, aby zakończyć...")
+        except EOFError:
+            pass
+
 
 if __name__ == "__main__":
     main()
