@@ -250,6 +250,20 @@ def manual_move(tic):
     except KeyboardInterrupt:
         print("\n[MAN] Przerwano przez użytkownika.")
 
+def _print_manual_help():
+    print("""
+[STEROWANIE RĘCZNE — skróty]
+  a / d        — jazda w lewo / prawo (prędkość ciągła)
+  SPACJA       — natychmiastowy STOP
+  0            — jedź do pozycji 0
+  z            — wyzeruj bieżącą pozycję (ustaw cur=0)
+  strzałka ↑   — zwiększ prędkość max
+  strzałka ↓   — zmniejsz prędkość max
+  strzałka →   — zwiększ przyspieszenie/hamowanie
+  strzałka ←   — zmniejsz przyspieszenie/hamowanie
+  q            — wyjście z trybu ręcznego
+""")
+
 def init_and_configure():
     tic = TicUSB()
     tic.energize()
@@ -263,8 +277,30 @@ def init_and_configure():
         tic.set_max_deceleration(int(MAX_DECEL * 0.8))
     return tic
 
+def safe_shutdown(tic):
+    if tic is None:
+        return
+    try:
+        if hasattr(tic, "set_target_velocity"):
+            try:
+                tic.set_target_velocity(0)
+            except Exception:
+                pass
+        if hasattr(tic, "enter_safe_start"):
+            try:
+                tic.enter_safe_start()
+            except Exception as e:
+                print(f"[WARN] enter_safe_start failed: {e}", file=sys.stderr)
+
+        if hasattr(tic, "deenergize"):
+            try:
+                tic.deenergize()
+            except Exception as e:
+                print(f"[WARN] deenergize failed: {e}", file=sys.stderr)
+    except Exception as e:
+        print(f"[WARN] cleanup wrapper failed: {e}", file=sys.stderr)
+
 def main():
-    # 1. wybór trybu
     while True:
         try:
             choice = int(input("Chose Oscillations (1) or Constant speed (2): "))
@@ -277,9 +313,12 @@ def main():
         else:
             print("Podaj 1 lub 2.")
 
+
+
+
     if choice == 1:
         x1, x2, cycles_goal = parse_cli_or_interactive()
-        speed = None  # Na razie bez  speed ale można dodać
+        speed = None  # Na razie bez  speed
     else:
         while True:
             try:
@@ -291,11 +330,8 @@ def main():
                 break
             else:
                 print("Liczba cykli musi być dodatnia.")
-
-        # możesz też zrobić input na speed, ale zostawiam Twoje stałe 0.6
         speed = int(MAX_SPEED * 0.6)
 
-    # 3. dopiero teraz konfigurujesz Tic + ruch
     tic = init_and_configure()
 
     try:

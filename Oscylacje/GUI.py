@@ -7,8 +7,8 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QPalette, QColor
 from PyQt5.QtCore import Qt, pyqtSignal, QObject, QThread
 
-from Oscylacja_CLI import *
-from Oscylacje import Oscylacja_GUI
+from Oscillatior_CLI import *
+from Oscylacje import Oscillator_GUI
 
 
 class StdoutRedirector(QObject):
