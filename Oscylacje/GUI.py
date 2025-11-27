@@ -7,7 +7,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QPalette, QColor
 from PyQt5.QtCore import Qt, pyqtSignal, QObject, QThread
 
-from Oscillatior_CLI import *
+from Oscillator_CLI import *
 from Oscylacje import Oscillator_GUI
 
 

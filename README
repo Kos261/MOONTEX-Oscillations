@@ -1,9 +1,0 @@
-### How to use this program
-
-1. Install uv
-
-2. Enter project directory
-
-3. Use ```uv sync``` to setup virtual enviroment and download required python version and libraries
-
-4. Use either command line interface (CLI) or graphical interface (GUI)

@@ -1,5 +1,5 @@
-from Oscillatior_CLI import *
-from Oscylacje import Oscillatior_CLI
+from Oscillator_CLI import *
+from Oscylacje import Oscillator_CLI
 
 def oscillations(tic, x1, x2, speed, cycles_goal):
     # speed tu na razie nie maI
