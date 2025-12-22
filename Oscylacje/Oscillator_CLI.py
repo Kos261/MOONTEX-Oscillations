@@ -319,27 +319,17 @@ def init_and_configure():
         print(f"[ERROR] {e}", file=sys.stderr)
 
 def safe_shutdown(tic):
-    if tic is None:
-        return
-    try:
-        if hasattr(tic, "set_target_velocity"):
-            try:
-                tic.set_target_velocity(0)
-            except Exception:
-                pass
-        if hasattr(tic, "enter_safe_start"):
-            try:
-                tic.enter_safe_start()
-            except Exception as e:
-                print(f"[WARN] enter_safe_start failed: {e}", file=sys.stderr)
+    """Zatrzymuje silnik i odcina zasilanie"""
+    if tic:
+        try:
+            tic.set_target_velocity(0)
+            tic.enter_safe_start()
+            tic.deenergize()
+            print(f"Motor deenergized", file=sys.stderr)
+        except Exception as e:
+            pass
+            print(f"[WARN] deenergize failed: {e}", file=sys.stderr)
 
-        if hasattr(tic, "deenergize"):
-            try:
-                tic.deenergize()
-            except Exception as e:
-                print(f"[WARN] deenergize failed: {e}", file=sys.stderr)
-    except Exception as e:
-        print(f"[WARN] cleanup wrapper failed: {e}", file=sys.stderr)
 
 def get_voltage(tic):
     voltage_mv = tic.get_vin_voltage()
