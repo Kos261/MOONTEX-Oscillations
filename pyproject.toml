@@ -13,6 +13,7 @@ dependencies = [
     "ticlib>=0.3.0",
     "pyads>=3.5.0",
     "pyinstaller>=6.17.0",
+    "rich>=14.2.0",
 ]
 
 #[tool.uv.required-environments]

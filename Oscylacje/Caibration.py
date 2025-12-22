@@ -70,10 +70,15 @@ def safe_shutdown(tic):
             print(f"[WARN] deenergize failed: {e}", file=sys.stderr)
     except Exception as e:
         print(f"[WARN] cleanup wrapper failed: {e}", file=sys.stderr)
-# ==============================================================================
 
+def get_voltage(tic):
+    voltage_mv = tic.get_vin_voltage()
+    voltage_v = voltage_mv / 1000.0
+    print("Voltage (V): ", voltage_v)
 
-# ============================ STEROWANIE RĘCZNE ===============================
+    if voltage_v > 25.0:
+        print("!!! Wykryto skok napięcia!!!")
+
 def manual_move(tic):
     """
     Sterowanie ręczne z klawiatury (prędkość ciągła).
@@ -92,6 +97,7 @@ def manual_move(tic):
     last_print = 0.0
     try:
         while True:
+            get_voltage(tic)
             # kierunek
             if keyboard.is_pressed("a"):
                 tic.set_target_velocity(-speed)
@@ -152,14 +158,15 @@ def manual_move(tic):
 
     except KeyboardInterrupt:
         print("\n[MAN] Przerwano przez użytkownika.")
-# ==============================================================================
-
 
 def init_and_configure():
     tic = TicUSB()
     tic.energize()
     tic.exit_safe_start()
     tic.halt_and_set_position(0)  # start od 0
+    curr_limit = tic.settings.get_current_limit()
+    print("Current limit (V): ", curr_limit)
+
 
     if SET_LIMITS:
         tic.set_starting_speed(START_SPEED)
@@ -202,13 +209,15 @@ def main():
     try:
         print("Odpinamy narty")
         tic = init_and_configure()
-        # _print_manual_help()
+        _print_manual_help()
         manual_move(tic)
-        # move(tic, speed=int(MAX_SPEED*0.4))
+
     except KeyboardInterrupt:
         print("\n[MAIN] Przerwano przez użytkownika.")
+
     except Exception as e:
         print(f"[ERROR] {e}", file=sys.stderr)
+
     finally:
         safe_shutdown(tic)
         print("Silnik odłączony, safe start aktywny. [kalibracja]")

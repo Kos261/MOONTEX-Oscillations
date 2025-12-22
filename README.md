@@ -10,5 +10,4 @@
 
 5. To convert to exe use 
 ```powershell
-pyinstaller --onefile --name Oscillator --add-binary "drivers\libusb-1.0.dll;." Oscylacje\Oscillator_CLI.py
-```
+uv run python -m PyInstaller --onefile --name Oscillator --add-binary "drivers\libusb-1.0.dll;." "<Project_path>\Oscylacje\Oscillator_CLI.py"```

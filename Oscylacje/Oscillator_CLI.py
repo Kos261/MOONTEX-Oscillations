@@ -95,6 +95,31 @@ def parse_cli_or_interactive():
         # tryb interaktywny
         return parse_interactive()
 
+def get_choice():
+    while True:
+        try:
+            choice = int(input("Chose Oscillations (1) or Constant speed (2) or Manual Mode (3): "))
+        except ValueError:
+            print("Podaj 1, 2 lub 3.")
+            continue
+
+        if choice in (1, 2, 3):
+            return choice
+        else:
+            print("Podaj 1, 2 lub 3.")
+
+def get_cycles():
+    while True:
+        try:
+            cycles_goal = int(input("Cycles goal: "))
+        except ValueError:
+            print("Podaj liczbę całkowitą.")
+            continue
+        if cycles_goal > 0:
+            return cycles_goal
+        else:
+            print("Liczba cykli musi być dodatnia.")
+
 def wait_until_reached(tic, target, timeout_s, tolerance):
     """Czeka aż silnik znajdzie się w pobliżu celu (z podtrzymaniem timeoutu)."""
     deadline = time.time() + timeout_s
@@ -129,6 +154,7 @@ def oscillations(tic, x1,x2, cycles_goal):
 
     cycles_done = 0
     while cycles_goal is None or cycles_done < cycles_goal:
+        get_voltage(tic)
         move_and_wait(tic, first_target)
         time.sleep(DWELL_S)
         move_and_wait(tic, other_target)
@@ -152,6 +178,7 @@ def keep_moving(tic, speed=int(MAX_SPEED * 0.33), cycles_goal=10):
 
     try:
         while counter < cycles_goal:
+            get_voltage(tic)
             cur = tic.get_current_position()
             pos_mod = cur % steps_per_rev
 
@@ -189,6 +216,7 @@ def manual_move(tic):
     last_print = 0.0
     try:
         while True:
+            # get_voltage(tic)
             # kierunek
             if keyboard.is_pressed("a"):
                 tic.set_target_velocity(-speed)
@@ -223,6 +251,12 @@ def manual_move(tic):
                 tic.set_target_velocity(0)
                 print("[MAN] STOP")
                 time.sleep(0.15)
+
+            if keyboard.is_pressed("h"):  # spacja: STOP
+                tic.set_target_velocity(0)
+                _print_manual_help()
+                time.sleep(0.15)
+
             if keyboard.is_pressed("z"):  # 'z': wyzeruj licznik pozycji
                 tic.halt_and_set_position(0)
                 print("[MAN] Ustawiono bieżącą pozycję = 0")
@@ -265,17 +299,24 @@ def _print_manual_help():
 """)
 
 def init_and_configure():
-    tic = TicUSB()
-    tic.energize()
-    tic.exit_safe_start()
-    tic.halt_and_set_position(0)  # start od 0
+    try:
+        tic = TicUSB()
+        tic.energize()
+        tic.exit_safe_start()
+        tic.halt_and_set_position(0)  # start od 0
+        curr_limit = tic.settings.get_current_limit()
+        print("Current limit (V): ", curr_limit)
 
-    if SET_LIMITS:
-        tic.set_starting_speed(START_SPEED)
-        tic.set_max_speed(MAX_SPEED)
-        tic.set_max_acceleration(int(MAX_ACCEL * 0.8))  # delikatniej
-        tic.set_max_deceleration(int(MAX_DECEL * 0.8))
-    return tic
+        if SET_LIMITS:
+            tic.set_starting_speed(START_SPEED)
+            tic.set_max_speed(MAX_SPEED)
+            tic.set_max_acceleration(int(MAX_ACCEL * 0.7))  # delikatniej
+            tic.set_max_deceleration(int(MAX_DECEL * 0.7))
+
+        return tic
+
+    except Exception as e:
+        print(f"[ERROR] {e}", file=sys.stderr)
 
 def safe_shutdown(tic):
     if tic is None:
@@ -300,62 +341,58 @@ def safe_shutdown(tic):
     except Exception as e:
         print(f"[WARN] cleanup wrapper failed: {e}", file=sys.stderr)
 
+def get_voltage(tic):
+    voltage_mv = tic.get_vin_voltage()
+    voltage_v = voltage_mv / 1000.0
+    print("Voltage (V): ", voltage_v)
+
+    if voltage_v > 30.0:
+        print("!!! Wykryto skok napięcia!!!")
+        safe_shutdown(tic)
+
+    return voltage_v
+
 def main():
-    while True:
-        try:
-            choice = int(input("Chose Oscillations (1) or Constant speed (2): "))
-        except ValueError:
-            print("Podaj 1 lub 2.")
-            continue
-
-        if choice in (1, 2):
-            break
-        else:
-            print("Podaj 1 lub 2.")
-
-
-
+    choice = get_choice()
 
     if choice == 1:
         x1, x2, cycles_goal = parse_cli_or_interactive()
-        speed = None  # Na razie bez  speed
-    else:
-        while True:
-            try:
-                cycles_goal = int(input("Cycles goal: "))
-            except ValueError:
-                print("Podaj liczbę całkowitą.")
-                continue
-            if cycles_goal > 0:
-                break
-            else:
-                print("Liczba cykli musi być dodatnia.")
         speed = int(MAX_SPEED * 0.6)
+
+    elif choice == 2:
+        cycles_goal = get_cycles()
+        speed = int(MAX_SPEED * 0.6)
+
+    # elif choice == 3:
+    #     # Manual chyba nic nie trzeba
+    #     pass
 
     tic = init_and_configure()
 
     try:
         if choice == 1:
             oscillations(tic, x1, x2, cycles_goal)
-        else:
+
+        elif choice == 2:
             keep_moving(tic, speed, cycles_goal)
 
+        elif choice == 3:
+            manual_move(tic)
+
+
     except KeyboardInterrupt:
-        print("\nPrzerwano przez użytkownika.")
+        print("\n[MAIN] Przerwano przez użytkownika.")
+
+    except Exception as e:
+        print(f"[ERROR] {e}", file=sys.stderr)
 
     finally:
+        safe_shutdown(tic)
+        print("Silnik odłączony, safe start aktywny. [kalibracja]")
         try:
-            tic.enter_safe_start()
-            tic.deenergize()
-        except Exception:
+            input("Naciśnij Enter, aby zamknąć...")
+        except (EOFError, UnicodeDecodeError):
             pass
-        print("Silnik odłączony, safe start aktywny.")
-
-        try:
-            input("Naciśnij Enter, aby zakończyć...")
-        except EOFError:
-            pass
-
 
 if __name__ == "__main__":
     main()
