@@ -23,23 +23,34 @@ DWELL_S = 0.3
 TOLERANCE = 50
 TIMEOUT_S = 60
 KEEPALIVE_PERIOD = 0.05
-MAX_SPEED = 60_000_000
+MAX_SPEED = 60_000_000     # microsteps / 10_000 sec
+MIN_SPEED = int(MAX_SPEED * 0.05)
 MAX_ACCEL = 2_000_000
 MAX_DECEL = 2 * MAX_ACCEL
 START_SPEED = 0
+STEPS_PER_REV = 400 * 18 #full cycle in crocs
+
 
 @dataclass
 class SharedState:
     position: int = 0
-    velocity: int = 0
+    velocity: float = 0
+    measured_velocity: float = 0
     voltage: float = 0.0
-    current_limit: int = 0 #?
+    current_limit: int = 0
+    rx: float = 0
+    scl: float = 0
+    sda: float = 0
+    tx: float = 0
     cycle_goal: any = None
     cycle_current: int = 0
     status_msg: str = "Initializing"
     mode_name: str = "Waiting"
     error: str = ""
     running: bool = True
+    pause: bool = False
+    connected: bool = False
+
 
 state = SharedState()
 
@@ -60,7 +71,14 @@ def update_metrics(tic):
     try:
         state.position = tic.get_current_position()
         state.voltage = tic.get_vin_voltage() / 1000.0
+        state.rx  = tic.get_analog_reading_rx()
+        state.scl = tic.get_analog_reading_scl()
+        state.sda = tic.get_analog_reading_sda()
+        state.tx  = tic.get_analog_reading_tx()
+        state.connected = True
+
     except Exception as e:
+        state.connected = False
         state.error = str(e)
 
 def wait_until_reached(tic, target, timeout_s, tolerance):
@@ -68,6 +86,39 @@ def wait_until_reached(tic, target, timeout_s, tolerance):
     deadline = time.time() + timeout_s
     next_keepalive = 0.0
     while time.time() < deadline and state.running:
+        if not state.connected:
+            raise Exception("USB Disconnected")
+
+        # Zmiana prędkości
+        # if keyboard.is_pressed("w"):
+        #     speed = min(MAX_SPEED, int(speed * 1.1) + 100)
+        #     tic.set_target_velocity(speed)
+        #     time.sleep(0.1)
+        # if keyboard.is_pressed("s"):
+        #     speed = max(MIN_SPEED, int(speed / 1.1))
+        #     tic.set_target_velocity(speed)
+        #     time.sleep(0.1)
+
+
+        if keyboard.is_pressed(" "):
+            state.pause = not state.pause
+            time.sleep(0.3)
+
+            if state.pause:
+                tic.halt_and_hold()
+
+        while state.running and state.pause:
+            state.status_msg = "Spacja START/STOP"
+            tic.reset_command_timeout()
+
+            if keyboard.is_pressed(" "):
+                state.pause = False
+                state.status_msg = "WZNAWIAM..."
+                tic.set_target_position(int(target))  # Wznów jazdę do celu
+                time.sleep(0.3)
+            time.sleep(0.05)
+
+
         now = time.time()
         if now >= next_keepalive:
             tic.reset_command_timeout()
@@ -80,11 +131,11 @@ def wait_until_reached(tic, target, timeout_s, tolerance):
 
         if keyboard.is_pressed(" "):
             state.status_msg = "STOPPED (Space)"
-            raise KeyboardInterrupt("Stopped by user")
+            # raise KeyboardInterrupt("Stopped by user")
+            # time.sleep(0.02)
         time.sleep(0.02)
 
     raise TimeoutError(f"Target {target} not reached (pos={state.position}).")
-
 
 def move_and_wait(tic, target):
     state.status_msg = f"MOVING to {target}"
@@ -120,7 +171,6 @@ def run_oscillations(tic, x1, x2, cycles_goal):
         state.status_msg = "Przerwano ręcznie!"
         tic.set_target_velocity(0)
 
-
 def run_manual(tic):
     state.mode_name = "MANUAL (WASD)"
     state.status_msg = "Use keys WASD. Space=STOP. Q=Exit"
@@ -129,9 +179,11 @@ def run_manual(tic):
     accel = max(1, int(MAX_ACCEL * 0.8))
     decel = max(1, int(MAX_DECEL * 0.8))
 
-    tic.set_max_acceleration(accel)
-    tic.set_max_deceleration(decel)
-    tic.set_max_speed(speed)
+    # if not state.connected:
+    #     raise Exception("USB Disconnected")
+    tic.set_max_acceleration(MAX_ACCEL)
+    tic.set_max_deceleration(MAX_DECEL)
+    tic.set_max_speed(MAX_SPEED)
 
     last_update = 0
 
@@ -139,6 +191,8 @@ def run_manual(tic):
         now = time.time()
         if now - last_update > 0.1:
             update_metrics(tic)
+            if not state.connected:
+                raise Exception("USB Disconnected")
             last_update = now
             state.velocity = speed  # Aktualizacja wyświetlania zadanej prędkości
 
@@ -154,87 +208,141 @@ def run_manual(tic):
             state.status_msg = "HOLD A OR D TO MOVE"
 
         # Zmiana prędkości
-        if keyboard.is_pressed("up"):
-            speed = min(MAX_SPEED, int(speed * 1.1) + 100)
-            tic.set_max_speed(speed)
+        if keyboard.is_pressed("w"):
+            speed = min(MAX_SPEED, int(speed + MAX_SPEED * 0.01))
+            tic.set_target_velocity(speed)
             time.sleep(0.1)
-        if keyboard.is_pressed("down"):
-            speed = max(1000, int(speed / 1.1))
-            tic.set_max_speed(speed)
+        if keyboard.is_pressed("s"):
+            speed = min(MIN_SPEED, int(speed - MAX_SPEED * 0.01))
+            tic.set_target_velocity(speed)
             time.sleep(0.1)
 
-        if keyboard.is_pressed("space"):
-            tic.set_target_velocity(0)
-            state.status_msg = "STOPPED"
-            time.sleep(0.5)
+        # if keyboard.is_pressed("space"):
+        #     tic.set_target_velocity(0)
+        #     state.status_msg = "STOPPED"
+        #     state.pause = not state.pause
+        #     # time.sleep(0.5)
 
         if keyboard.is_pressed("q"):
             state.status_msg = "EXITING MANUAL MODE"
+            state.running = False
             break
 
         tic.reset_command_timeout()
         time.sleep(0.01)
 
-
 def run_constant_speed(tic, speed, cycles_goal):
     state.mode_name = "CONSTANT SPEED"
     state.cycle_goal = cycles_goal
-    steps_per_rev = 400 * 18
 
     tic.set_target_velocity(speed)
-    prev_pos_mod = tic.get_current_position() % steps_per_rev
+    state.velocity = speed
+    prev_pos_mod = tic.get_current_position() % STEPS_PER_REV
 
+
+    last_pos = tic.get_current_position()
+    time_start = time.time()
     try:
         while state.running and state.cycle_current < cycles_goal:
-            update_metrics(tic)
-            cur = state.position
-            pos_mod = cur % steps_per_rev
+            time_stop = time.time()
+            if keyboard.is_pressed(" "): # PAUSE
+                state.pause = not state.pause
+                time.sleep(0.3)
 
-            # Detekcja obrotu
+                if state.pause == True:
+                    # last_calc_time = time.time()
+                    tic.halt_and_hold()
+                    state.status_msg = "STOPPED (Space)"
+
+                elif state.pause == False:
+                    tic.set_target_velocity(speed)  # Wznów
+
+            if keyboard.is_pressed("w"):
+                speed = min(MAX_SPEED, int(speed + MAX_SPEED * 0.01))
+                state.velocity = speed
+                tic.set_target_velocity(speed)
+                time.sleep(0.1)
+
+            if keyboard.is_pressed("s"):
+                speed = max(MIN_SPEED, int(speed - MAX_SPEED * 0.01))
+                state.velocity = speed
+                tic.set_target_velocity(speed)
+                time.sleep(0.1)
+
+            update_metrics(tic)
+            dt = time_stop - time_start
+            if dt >= 1.0:
+                curr = tic.get_current_position()
+                delta_pos = abs(curr - last_pos)
+                state.measured_velocity = delta_pos / dt * 10_000
+                time_start = time.time()
+                last_pos = curr
+
+
+            state.velocity = speed
+            cur = state.position
+            pos_mod = cur % STEPS_PER_REV
+
+            # Cycle counter
             if pos_mod < prev_pos_mod:
                 state.cycle_current += 1
             prev_pos_mod = pos_mod
 
             tic.reset_command_timeout()
-
-            if keyboard.is_pressed(" "):
-                raise KeyboardInterrupt
-
-            state.status_msg = f"CYCLES {speed} crocs/s"
+            state.status_msg = f"RUNNING"
             time.sleep(0.02)
 
     except KeyboardInterrupt:
         state.status_msg = "STOPPED"
         tic.set_target_velocity(0)
 
-
-def motor_thread_func(choice, params):
-    try:
-        state.status_msg = "Łączenie z TicUSB..."
-        tic = TicUSB()
-        tic.energize()
-        tic.exit_safe_start()
-        tic.halt_and_set_position(0)
-        # SET MAX VALUES
-        state.current_limit = tic.settings.get_current_limit()
-        tic.set_starting_speed(START_SPEED)
-        tic.set_max_speed(MAX_SPEED)
-        tic.set_max_acceleration(int(MAX_ACCEL * 0.7))
-        tic.set_max_deceleration(int(MAX_DECEL * 0.7))
-
-        if choice == 1:
-            run_oscillations(tic, params['x1'], params['x2'], params['cycles'])
-        elif choice == 2:
-            run_constant_speed(tic, int(MAX_SPEED * 0.6), params['cycles'])
-        elif choice == 3:
-            run_manual(tic)
-
-    except Exception as e:
-        state.error = str(e)
-        state.status_msg = "ERROR"
     finally:
         safe_shutdown(tic)
-        state.running = False
+        tic = None
+
+def motor_thread_func(choice, params):
+    while state.running:
+        global tic
+        tic = None
+        try:
+            state.connected = False
+            state.status_msg = "Łączenie z TicUSB..."
+            tic = TicUSB()
+            state.connected = True
+            state.error = ""
+            state.status_msg = "Połączono"
+
+            tic.energize()
+            tic.exit_safe_start()
+            tic.halt_and_set_position(0)
+            # SET MAX VALUES
+            state.current_limit = tic.settings.get_current_limit()
+            tic.set_starting_speed(START_SPEED)
+            tic.set_max_speed(MAX_SPEED)
+            tic.set_max_acceleration(int(MAX_ACCEL))
+            tic.set_max_deceleration(int(MAX_DECEL))
+
+            if choice == 1:
+                run_oscillations(tic, params['x1'], params['x2'], params['cycles'])
+            elif choice == 2:
+                run_constant_speed(tic, int(MAX_SPEED * 0.5), params['cycles'])
+            elif choice == 3:
+                run_manual(tic)
+
+            while state.running and state.connected:
+                update_metrics(tic)  # sprawdzamy czy USB żyje
+                time.sleep(0.2)
+
+        except Exception as e:
+            state.connected = False
+            state.error = str(e)
+            state.status_msg = "ERROR"
+            safe_shutdown(tic)
+            time.sleep(2.0)
+        finally:
+            safe_shutdown(tic)
+            tic = None
+        #     state.running = False
 
 def make_layout():
     layout = Layout()
@@ -250,16 +358,32 @@ def make_layout():
     return layout
 
 def generate_dashboard():
-    # 1. Tabela Statusu (Lewa strona)
+    if not state.connected:
+        warning_text = Text("\n\nWAITING FOR USB...\n", style="bold white on red", justify="center")
+        # warning_text.append(f"\nERROR: {state.error}", style="italic white")
+        return Panel(warning_text, title="NO CONNECTION", border_style="red")
+
+    # Left side
     status_table = Table(title="Parametry Silnika", expand=True, border_style="blue")
     status_table.add_column("Parametr", style="cyan")
     status_table.add_column("Wartość", justify="right", style="green")
 
-    status_table.add_row("Tryb", f"[bold yellow]{state.mode_name}[/]")
-    status_table.add_row("Pozycja", f"{state.position} µstep")
-    status_table.add_row("Napięcie (VIN)", f"{state.voltage:.2f} V")
 
-    # Koloruj napięcie na czerwono jeśli niebezpieczne
+    mode_str = f"[bold yellow]{state.mode_name}[/]"
+    if state.pause:
+        mode_str += " [bold white on red] PAUZA [/]"
+    status_table.add_row(mode_str)
+    status_table.add_row("Pozycja", f"{state.position % STEPS_PER_REV} µstep")
+    vel_percent = state.velocity / MAX_SPEED * 100
+    status_table.add_row("Prędkość zadana (%)", f"{vel_percent:.2f}%")
+    status_table.add_row("Prędkość zadana", f"{state.velocity:.2f} µstep")
+    status_table.add_row("Prędkość zmierzona", f"{state.measured_velocity:.2f} µstep")
+    status_table.add_row("Napięcie (VIN)", f"{state.voltage:.2f} V")
+    status_table.add_row("RX", f"{state.rx:.2f}")
+    status_table.add_row("SCL", f"{state.scl:.2f}")
+    status_table.add_row("SDA", f"{state.sda:.2f}")
+    status_table.add_row("TX", f"{state.tx:.2f}")
+
     volt_style = "red blink" if state.voltage > 28.0 else "green"
     status_table.rows[2].style = volt_style
 
@@ -271,21 +395,20 @@ def generate_dashboard():
         prog = f"{state.cycle_current}"
     status_table.add_row("Licznik Cykli", prog)
 
-    # 2. Panel Info (Prawa strona) - Zależny od trybu
+    # Right side
     if "MANUAL" in state.mode_name:
         info_text = Text.from_markup("""
 [bold underline]STEROWANIE:[/bold underline]
 [bold green]A / D[/]     - Ruch Lewo/Prawo
 [bold green]W / S[/]     - Prędkość +/-
 [bold yellow]Q[/]         - Zakończ
-[bold red]SPACJA[/]    - STOP AWARYJNY
 """)
     else:
         info_text = Text.from_markup("""
 [bold underline]STATUS AUTOMATYCZNY:[/bold underline]
 Program wykonuje zadaną sekwencję.
-
-[bold red]SPACJA[/] - Zatrzymaj program
+[bold green]W / S[/]     - Prędkość +/-
+[bold red]SPACJA[/] - Pauza
 """)
 
     if state.error:
@@ -300,7 +423,7 @@ Program wykonuje zadaną sekwencję.
 
     # Złożenie całości
     layout = make_layout()
-    layout["header"].update(Panel(Align.center("[bold magenta]MOONTEX MOTOR CONTROLLER v2.0[/]"), style="blue"))
+    layout["header"].update(Panel(Align.center("[bold magenta]MOONTEX MOTOR CONTROLLER[/]"), style="blue"))
     layout["left"].update(Panel(status_table, title="Dane Live"))
     layout["right"].update(right_panel)
     layout["footer"].update(footer_panel)
@@ -309,6 +432,7 @@ Program wykonuje zadaną sekwencję.
 
 
 def main():
+    global tic_device
     console = Console()
     console.clear()
     console.print("[bold cyan]Wybierz tryb pracy:[/]")
@@ -332,7 +456,13 @@ def main():
             params['cycles'] = CYCLES_DEFAULT
 
     elif choice == 2:
-        params['cycles'] = 1000  # Default huge
+        try:
+            c_in = input(f"Liczba cykli [enter={CYCLES_DEFAULT}]: ")
+            params['cycles'] = int(c_in) if c_in else CYCLES_DEFAULT
+            params['x1'] = X1_DEFAULT
+            params['x2'] = X2_DEFAULT
+        except:
+            params['cycles'] = CYCLES_DEFAULT
 
     # Uruchomienie wątku silnika
     motor_thread = threading.Thread(target=motor_thread_func, args=(choice, params), daemon=True)
@@ -341,16 +471,18 @@ def main():
     # Uruchomienie TUI
     try:
         with Live(generate_dashboard(), refresh_per_second=10, screen=True) as live:
-            while state.running and motor_thread.is_alive():
+            # while state.running and motor_thread.is_alive():
+            while state.running:
                 live.update(generate_dashboard())
                 time.sleep(0.1)
     except KeyboardInterrupt:
+        state.status_msg = "Zamykanie programu..."
         state.running = False
 
-    # Czekaj na zakończenie wątku silnika
-    state.running = False
-    motor_thread.join(timeout=2.0)
-    print("Program zakończony.")
+    finally:
+        state.running = False
+        motor_thread.join(timeout=2.0)
+        print("Program zakończony.")
 
 if __name__ == "__main__":
     main()
